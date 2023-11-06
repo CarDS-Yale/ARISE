@@ -1,9 +1,7 @@
-# CarDS Lab Template
+# ARISE
 
-Repository Template for CarDS Lab Projects
+This is a repository for the development and validation of ARISE, Algorithmic Risk Inspection for Screening Elevated Lipoprotein(a).
 
-1. Create new empty repo in github
-2. There are 2 main ways of creating a repo that complies with the template.
-(i) On Github.com use "Import a repository" while creating a new repository in Cards Lab and use URL "https://github.com/CarDS-Yale/CarDS_lab_template.git"
-(ii) If you plan to use git command line or GitHub desktop, recommend creating an empty git repo at CarDS Lab, and download the template to a local folder (and commit via command line or GitHub Desktop)
-3. All data should be in a `data_folder` that should be added to .gitignore
+ARISE is an extreme gradient boosting (XGBoost) model for optimizing screening for elevated lipoprotein(a) using 6 commonly available clinical features. It has been developed in the UK Biobank, the largest cohort of individuals (>450,000) with protocolized lipoprotein(a) assessment, and externally validated in established US-based prospective cohort studies of Atherosclerosis Risk in Communities (ARIC), Coronary Artery Risk Development in Young Adults (CARDIA), and Multi-Ethnic Study of Atherosclerosis (MESA).
+
+The preprint is available at: https://doi.org/10.1101/2023.09.18.23295745 
