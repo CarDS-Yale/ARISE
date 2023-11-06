@@ -1,0 +1,666 @@
+
+Libraries
+
+```{r, include=FALSE}
+library(tidyverse)
+library(dplyr)
+library(table1)
+library(Hmisc)
+library(aod)
+library(pROC)
+library(forestplot)
+library(ggplotify)
+library(patchwork)
+library(survival)
+library(survminer)
+```
+
+Read the dataset
+
+```{r, include=FALSE}
+ukbb <- read.csv("/Lp(a) Project/Statistical Analysis/Data/ukb_complete_parsimonious_with_preds.csv")
+aric <- read.csv("/Lp(a) Project/Data/aric.csv")
+cardia <- read.csv("/Lp(a) Project/Data/cardia.csv")
+mesa <- read.csv("/Lp(a) Project/Data/mesa.csv")
+ukb_train <- read.csv("/Lp(a) Project/Data/ukb_train.csv")
+ukb_test <- read.csv("/Lp(a) Project/Data/ukb_test.csv")
+```
+
+Formatting
+
+```{r}
+ukbb$ethnicity <- as.factor(case_when(
+  ukbb$ethnicity == 1 ~ "White",
+  ukbb$ethnicity == 2 ~ "Mixed",
+  ukbb$ethnicity == 3 ~ "South Asian",
+  ukbb$ethnicity == 4 ~ "Black",
+  ukbb$ethnicity == 5 ~ "Chinese",
+  ukbb$ethnicity == 6 ~ "Other"))
+
+ukbb$sex <- as.factor(case_when(
+  ukbb$sex == 0 ~ "Female",
+  ukbb$sex == 1 ~ "Male"))
+
+factor_cols <- c("sex","ethnicity", "cvd_family_history", "htn", "dm", "t1dm", "t2dm", "ckd",
+                 "heart_failure", "ihd", "pad", "stroke", "premature_ascvd", "cabg", "pci",
+                 "carotid_revasc", "pad_revasc", "premature_cv_procedure", "statin", "aspirin",
+                 "llt", "anti_htn", "insulin", "hrt", "ocp", "hormone_est_prog", "ascvd",
+                 "premature_ascvd_cvpx", "visit")
+ukbb[factor_cols] <- lapply(ukbb[factor_cols], factor)
+
+ukbb$heart_failure_num_cat <- as.factor(case_when(ukbb$heart_failure_num == 0 ~ "0",
+                                        ukbb$heart_failure_num == 1 ~ "1",
+                                        ukbb$heart_failure_num == 2 ~ "2",
+                                        ukbb$heart_failure_num >= 3 ~ ">=3"))
+
+ukbb$ihd_num_cat <- as.factor(case_when(ukbb$ihd_num == 0 ~ "0",
+                              ukbb$ihd_num == 1 ~ "1",
+                              ukbb$ihd_num == 2 ~ "2",
+                              ukbb$ihd_num >= 3 ~ ">=3"))
+
+ukbb$pad_num_cat <- as.factor(case_when(ukbb$pad_num == 0 ~ "0",
+                              ukbb$pad_num == 1 ~ "1",
+                              ukbb$pad_num == 2 ~ "2",
+                              ukbb$pad_num >= 3 ~ ">=3"))
+
+ukbb$stroke_num_cat <- as.factor(case_when(ukbb$stroke_num == 0 ~ "0",
+                                 ukbb$stroke_num == 1 ~ "1",
+                                 ukbb$stroke_num == 2 ~ "2",
+                                 ukbb$stroke_num >= 3 ~ ">=3"))
+
+ukbb$cabg_num_cat <- as.factor(case_when(ukbb$cabg_num == 0 ~ "0",
+                               ukbb$cabg_num == 1 ~ "1",
+                               ukbb$cabg_num == 2 ~ "2",
+                               ukbb$cabg_num >= 3 ~ ">=3"))
+
+ukbb$pci_num_cat <- as.factor(case_when(ukbb$pci_num == 0 ~ "0",
+                              ukbb$pci_num == 1 ~ "1",
+                              ukbb$pci_num == 2 ~ "2",
+                              ukbb$pci_num >= 3 ~ ">=3"))
+
+ukbb$carotid_revasc_num_cat <- as.factor(case_when(ukbb$carotid_revasc_num == 0 ~ "0",
+                                         ukbb$carotid_revasc_num == 1 ~ "1",
+                                         ukbb$carotid_revasc_num == 2 ~ "2",
+                                         ukbb$carotid_revasc_num >= 3 ~ ">=3"))
+
+ukbb$pad_revasc_num_cat <- as.factor(case_when(ukbb$pad_revasc_num == 0 ~ "0",
+                                     ukbb$pad_revasc_num == 1 ~ "1",
+                                     ukbb$pad_revasc_num == 2 ~ "2",
+                                     ukbb$pad_revasc_num >= 3 ~ ">=3"))
+
+ukbb$lp_a_cat <- as.factor(case_when(ukbb$lp_a_value>=150 ~ "Yes",
+                                     ukbb$lp_a_value<150 ~ "No"))
+ukbb$age_at_first_ascvd_cvpx[ukbb$age_at_first_ascvd_cvpx==0] <- NA 
+```
+
+
+Plotting tables
+
+```{r}
+### Baseline characteristics
+pvalue <- function(x, ...) {
+    # Construct vectors of data y, and groups (strata) g
+    y <- unlist(x)
+    g <- factor(rep(1:length(x), times = sapply(x, length)))
+    if (is.numeric(y)) {
+        # For numeric variables, perform a standard 2-sample t-test
+        p <- t.test(y ~ g)$p.value
+    } else {
+        # For categorical variables, perform a chi-squared test of independence
+        p <- chisq.test(table(y, g))$p.value
+    }
+    # Format the p-value, using an HTML entity for the less-than sign.
+    # The initial empty string places the output on the line below the variable label.
+    c("", sub("<", "&lt;", format.pval(p, digits=3, eps=0.001)))
+}
+
+label(ukbb$age) <- "Age (years)"
+label(ukbb$sex) <- "Sex"
+label(ukbb$ethnicity) <- "Ethnicity"
+label(ukbb$bmi)  <- "BMI (kg/m2)"
+label(ukbb$sbp) <- "Systolic Blood Pressure (mmHg)"
+label(ukbb$dbp) <- "Diastolic Blood Pressure (mmHg)"
+label(ukbb$hr) <- "Heart Rate (beats per minute)"
+label(ukbb$htn) <- "Hypertension"
+label(ukbb$dm) <- "DM"
+label(ukbb$t1dm) <- "T1DM"
+label(ukbb$t2dm) <- "T2DM"
+label(ukbb$ckd) <- "CKD"
+label(ukbb$ihd) <- "IHD"
+label(ukbb$heart_failure) <- "Heart Failure"
+label(ukbb$stroke) <- "Ischemic Stroke"
+label(ukbb$pad) <- "PAD"
+label(ukbb$ihd_num_cat) <- "Acute IHD Hospitalization"
+label(ukbb$heart_failure_num_cat) <- "Acute Heart Failure Hospitalization"
+label(ukbb$stroke_num_cat) <- "Acute Ischemic Stroke Hospitalization"
+label(ukbb$pad_num_cat) <- "Acute PAD Hospitalization"
+label(ukbb$cabg) <- "CABG"
+label(ukbb$pci) <- "PCI"
+label(ukbb$carotid_revasc) <- "Carotid Revascularization"
+label(ukbb$pad_revasc) <- "PAD Revascularization"
+label(ukbb$cabg_num_cat) <- "CABG Procedures"
+label(ukbb$pci_num_cat) <- "PCI Procedures"
+label(ukbb$carotid_revasc_num_cat) <- "Carotid Revascularization Procedures"
+label(ukbb$pad_revasc_num_cat) <- "PAD Revascularization Procedures"
+label(ukbb$premature_ascvd_cvpx) <- "Premature ASCVD"
+label(ukbb$age_at_first_ascvd_cvpx) <- "Age at First ASCVD"
+label(ukbb$statin) <- "Statin"
+label(ukbb$aspirin) <- "Aspirin"
+label(ukbb$llt) <- "Lipid Lowering Therapy"
+label(ukbb$anti_htn) <- "Anti-Hypertensive Medication"
+label(ukbb$insulin) <- "Insulin"
+label(ukbb$hrt) <- "Hormone Replacement Therapy"
+label(ukbb$ocp) <- "Contraceptive Pill"
+label(ukbb$hb) <- "Hemoglobin (g/dL)"
+label(ukbb$mcv) <- "MCV (fL)"
+label(ukbb$wbc) <- "WBC (10^9/L)"
+label(ukbb$plt) <- "Platelet (10^9/L)"
+label(ukbb$ldl) <- "LDL (mmol/L)"
+label(ukbb$hdl) <- "HDL (mmol/L)"
+label(ukbb$cholesterol) <- "Total Cholesterol (mmol/L)"
+label(ukbb$triglycerides) <- "Triglycerides (mmol/L)"
+label(ukbb$glucose) <- "FBS (mmol/L)"
+label(ukbb$hba1c) <- "HbA1C (mmol/mol)"
+label(ukbb$alt) <- "ALT (U/L)"
+label(ukbb$ast) <- "AST (U/L)"
+label(ukbb$alp) <- "ALP (U/L)"
+label(ukbb$bil_d) <- "Direct Bilirubin (umol/L)"
+label(ukbb$bil_t) <- "Total Bilirubin (umol/L)"
+label(ukbb$creactive_protein) <- "C-Reactive Protein (mg/L)"
+label(ukbb$calcium) <- "Calcium (mmol/L)"
+label(ukbb$phosphate) <- "Phosphate (mmol/L)"
+label(ukbb$total_protein) <- "Total Protein (g/L)"
+label(ukbb$albumin) <- "Albumin (g/L)"
+label(ukbb$vitamin_d) <- "Vitamin D (nmol/L)"
+label(ukbb$visit) <- "Visit"
+label(ukbb$cvd_family_history) <- "Family History of CVD"
+label(ukbb$smoking) <- "Smoking"
+ukbb$smoking <- factor(ukbb$smoking, levels=c(0:2), labels=c("Never", "Former", "Current"))
+
+ukbb$lpa_meas <- factor(case_when(is.na(ukbb$lp_a_value) ~ 1,
+                                  !is.na(ukbb$lp_a_value) ~ 0))
+
+
+table1(~age + sex + ethnicity + smoking + bmi + sbp + dbp + hr + htn + dm + t1dm + t2dm + ckd + ihd +
+          ihd_num_cat + heart_failure + heart_failure_num_cat + stroke + stroke_num_cat + pad +
+          cabg + pci + carotid_revasc + pad_revasc +
+          ascvd + premature_ascvd_cvpx + age_at_first_ascvd_cvpx + cvd_family_history + 
+         aspirin + statin + llt + anti_htn + insulin +
+          hrt + ocp + hormone_est_prog + hb + mcv + wbc + plt + ldl + hdl + cholesterol +
+          triglycerides + glucose + hba1c + alt + ast + alp + bil_d + bil_t + creactive_protein +
+          calcium + phosphate + total_protein + albumin + vitamin_d + ascvd |
+          arise,
+        overall = c(left="Overall"), rowlabelhead = "Characteristic",
+        data = ukbb, render.missing = NULL, render.categorical="FREQ (PCTnoNA%)",
+        #extra.col=list(`P-value`=pvalue)
+        )
+
+```
+
+External Validation
+
+```{r}
+# ARIC
+factor_cols <- c("sex", "ethnicity", "htn", "dm", "ihd", "stroke", "pad", "cabg",
+                 "pci", "carotid_revasc", "pad_revasc", "ascvd", "cvd_family_history", 
+                 "premature_chd_family_history", "statin", "llt", "anti_htn", 
+                 "hormone_est_prog", "heart_failure")
+aric[factor_cols] <- lapply(aric[factor_cols], factor)
+
+label(aric$age) <- "Age (years)"
+label(aric$sex) <- "Sex"
+label(aric$ethnicity) <- "Ethnicity"
+label(aric$bmi) <- "BMI (kg/m2)"
+label(aric$htn) <- "Hypertension"
+label(aric$dm) <- "DM"
+label(aric$heart_failure) <- "Heart Failure"
+label(aric$ihd) <- "IHD"
+label(aric$stroke) <- "Stroke"
+label(aric$pad) <- "PAD"
+label(aric$cabg) <- "CABG"
+label(aric$pci) <- "PCI"
+label(aric$carotid_revasc) <- "Carotid Revascularization"
+label(aric$pad_revasc) <- "PAD Revascularization"
+label(aric$statin) <- "Statin"
+label(aric$cvd_family_history) <- "Family History of ASCVD"
+label(aric$premature_chd_family_history) <- "Family History of Premature CHD"
+label(aric$llt) <- "Lipid Lowering Therapy"
+label(aric$anti_htn) <- "Anti-Hypertensive Medication"
+label(aric$hormone_est_prog) <- "OCP/HRT"
+label(aric$ldl) <- "LDL (mmol/L)"
+label(aric$hdl) <- "HDL (mmol/L)"
+label(aric$cholesterol) <- "Total Cholesterol (mmol/L)"
+label(aric$triglycerides) <- "Triglycerides (mmol/L)"
+label(aric$ascvd) <- "ASCVD"
+
+aric$lp_a_cat <- as.factor(case_when(aric$lp_a_value>=150 ~ "Yes",
+                                     aric$lp_a_value<150 ~ "No"))
+table1(~age + sex + ethnicity + bmi + htn + dm + ihd + heart_failure + stroke + pad + cabg + pci + 
+         carotid_revasc + pad_revasc + ascvd + cvd_family_history + premature_chd_family_history +
+         statin + llt + anti_htn + hormone_est_prog + ldl + hdl + cholesterol +
+         triglycerides | lp_a_cat,
+       overall = c(left="Overall"), rowlabelhead = "Characteristic",
+       data = aric, render.missing = NULL, render.categorical="FREQ (PCTnoNA%)",
+       #extra.col=list(`P-value`=pvalue)
+       )
+
+#CARDIA
+factor_cols <- c("sex", "ethnicity", "htn", "dm", "ihd", "cvd_family_history", 
+                 "premature_chd_family_history",  "statin", "anti_htn",  
+                 "hormone_est_prog")
+cardia[factor_cols] <- lapply(cardia[factor_cols], factor)
+
+label(cardia$age) <- "Age (years)"
+label(cardia$sex) <- "Sex"
+label(cardia$ethnicity) <- "Ethnicity"
+label(cardia$bmi) <- "BMI (kg/m2)"
+label(cardia$htn) <- "Hypertension"
+label(cardia$dm) <- "DM"
+label(cardia$ihd) <- "IHD"
+label(cardia$ascvd) <- "ASCVD"
+label(cardia$cvd_family_history) <- "Family History of ASCVD"
+label(cardia$premature_chd_family_history) <- "Family History of Premature CHD"
+label(cardia$statin) <- "Lipid Lowering Therapy"
+label(cardia$anti_htn) <- "Anti-Hypertensive Medication"
+label(cardia$hormone_est_prog) <- "OCP/HRT"
+label(cardia$ldl) <- "LDL (mmol/L)"
+label(cardia$hdl) <- "HDL (mmol/L)"
+label(cardia$cholesterol) <- "Total Cholesterol (mmol/L)"
+label(cardia$triglycerides) <- "Triglycerides (mmol/L)"
+
+cardia$lp_a_cat <- as.factor(case_when(cardia$lp_a_value>=150 ~ "Yes",
+                                     cardia$lp_a_value<150 ~ "No"))
+table1(~age + sex + ethnicity + bmi + htn + dm + ihd + cvd_family_history + premature_chd_family_history +
+         statin + anti_htn + hormone_est_prog + ldl + hdl + cholesterol +
+         triglycerides | lp_a_cat,
+       overall = c(left="Overall"), rowlabelhead = "Characteristic",
+       data = cardia, render.missing = NULL, render.categorical="FREQ (PCTnoNA%)",
+       #extra.col=list(`P-value`=pvalue)
+       )
+
+# MESA
+factor_cols <- c("sex", "ethnicity", "dm", "t1dm", "t2dm", "htn", "ascvd", "cvd_family_history", 
+                  "statin", "llt", "anti_htn", "insulin", "aspirin", "hormone_est_prog")
+mesa[factor_cols] <- lapply(mesa[factor_cols], factor)
+
+label(mesa$age) <- "Age (years)"
+label(mesa$sex) <- "Sex"
+label(mesa$ethnicity) <- "Ethnicity"
+label(mesa$bmi) <- "BMI (kg/m2)"
+label(mesa$htn) <- "Hypertension"
+label(mesa$dm) <- "DM"
+label(mesa$t1dm) <- "T1DM"
+label(mesa$t2dm) <- "T2DM"
+label(mesa$statin) <- "Statin"
+label(mesa$aspirin) <- "Aspirin"
+label(mesa$insulin) <- "Insulin"
+label(mesa$cvd_family_history) <- "Family History of ASCVD"
+label(mesa$llt) <- "Lipid Lowering Therapy"
+label(mesa$anti_htn) <- "Anti-Hypertensive Medication"
+label(mesa$hormone_est_prog) <- "OCP/HRT"
+label(mesa$ldl) <- "LDL (mmol/L)"
+label(mesa$hdl) <- "HDL (mmol/L)"
+label(mesa$cholesterol) <- "Total Cholesterol (mmol/L)"
+label(mesa$triglycerides) <- "Triglycerides (mmol/L)"
+label(mesa$ascvd) <- "ASCVD"
+
+mesa$lp_a_cat <- as.factor(case_when(mesa$lp_a_value>=150 ~ "Yes",
+                                     mesa$lp_a_value<150 ~ "No"))
+table1(~age + sex + ethnicity + bmi + dm + t1dm + t2dm + htn + ascvd + cvd_family_history +
+         aspirin + statin + llt + anti_htn + insulin + hormone_est_prog + ldl + hdl + cholesterol +
+         triglycerides | lp_a_cat,
+       overall = c(left="Overall"), rowlabelhead = "Characteristic",
+       data = mesa, render.missing = NULL, render.categorical="FREQ (PCTnoNA%)",
+       #extra.col=list(`P-value`=pvalue)
+       )
+```
+
+Comparative Table
+
+```{r}
+ukbb$database <- "UKBB"
+aric$database <- "ARIC"
+cardia$database <- "CARDIA"
+mesa$database <- "MESA"
+
+merged <- ukbb %>%
+  merge(aric, by = c("age", "sex", "ethnicity", "bmi", "dm", "htn", "ascvd",
+                     "cvd_family_history", "statin", "anti_htn", "ldl", "hdl",
+                     "cholesterol", "triglycerides", "lp_a_value", "database"), all = TRUE) %>%
+  merge(cardia, by = c("age", "sex", "ethnicity", "bmi", "dm", "htn", "ascvd",
+                     "cvd_family_history", "statin", "anti_htn", "ldl", "hdl",
+                     "cholesterol", "triglycerides", "lp_a_value", "database"), all = TRUE) %>%
+  merge(mesa, by = c("age", "sex", "ethnicity", "bmi", "dm", "htn", "ascvd",
+                     "cvd_family_history", "statin", "anti_htn", "ldl", "hdl",
+                     "cholesterol", "triglycerides", "lp_a_value", "database"), all = TRUE)
+
+table1(~age + sex + ethnicity + bmi + dm + htn + ascvd + cvd_family_history +
+         statin + anti_htn + ldl + hdl + cholesterol + triglycerides | database,
+       overall = FALSE, rowlabelhead = "Characteristic",
+       data = merged, render.missing = NULL, render.categorical="FREQ (PCTnoNA%)",
+       #extra.col=list(`P-value`=pvalue)
+       )
+```
+
+
+Forest Plots for Subgroups
+```{r}
+subgroup_forest <- read.csv("/Lp(a) Project/Statistical Analysis/Data/subgroup_forest.csv")
+
+header <- tibble(label = c("", "Subgroup"), AUROC = c("", "AUROC (95% CI)"),
+                 Relative.Reduction.of.NNT = c("", "NNT Relative Reduction"))
+
+subgroup_ukb <- bind_rows(header, subgroup_forest %>% filter(dataset=="ukbb_test"))
+subgroup_aric <- bind_rows(header, subgroup_forest %>% filter(dataset=="ARIC"))
+subgroup_cardia <- bind_rows(header, subgroup_forest %>% filter(dataset=="CARDIA"))
+subgroup_mesa <- bind_rows(header, subgroup_forest %>% filter(dataset=="MESA"))
+
+ukb_forest <- subgroup_ukb %>%
+  forestplot(labeltext = c(label, AUROC, Relative.Reduction.of.NNT), 
+                      is.summary = c(rep(TRUE, 3), rep(FALSE, 26)),
+                       graph.pos = 2,
+                     graphwidth = unit(70, 'mm'),
+                      # graphwidth = "auto",
+                      colgap = unit(8, 'mm'),
+                      #lineheight = "auto",
+                       boxsize = c(0.9, 0.9, 0.9, rep(0.25, 26)),
+                       clip = c(0, 1),
+                       align = c("l", "c", "c", "c", "c") , 
+                       xlog = FALSE, 
+                       title = "UKB Held-out Test Set", 
+                       txt_gp = fpTxtGp(title = gpar(cex=2), ticks = gpar(cex=0.7)),
+                       xticks=c(0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1),
+                       col=fpColors(box="#0f4d92",line="#0f4d92"), 
+                       ci.vertices = TRUE, 
+                      ci.vertices.height = 0.1,
+             lwd.zero = FALSE,
+             grid = structure(c(0.5), gp = gpar(lty = 2, col = "#CCCCFF")),
+             hrzl_lines = list("3" = gpar(lwd=1), "4" = gpar(lty=2)))
+
+aric_forest <- subgroup_aric %>%
+  forestplot(labeltext = c(label, AUROC, Relative.Reduction.of.NNT), 
+                      is.summary = c(rep(TRUE, 3), rep(FALSE, 25)),
+                       graph.pos = 2,
+                     graphwidth = unit(70, 'mm'),
+                      # graphwidth = "auto",
+                      colgap = unit(8, 'mm'),
+                      #lineheight = "auto",
+                       boxsize = c(0.9, 0.9, 0.9, rep(0.25, 20)),
+                       clip = c(0, 1),
+                       align = c("l", "c", "c", "c", "c") , 
+                       xlog = FALSE, 
+                       title = "ARIC", 
+                       txt_gp = fpTxtGp(title = gpar(cex=2), ticks = gpar(cex=0.7)),
+                       xticks=c(0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1),
+                       col=fpColors(box="#0f4d92",line="#0f4d92"), 
+                       ci.vertices = TRUE, 
+                      ci.vertices.height = 0.1,
+             lwd.zero = FALSE,
+             grid = structure(c(0.5), gp = gpar(lty = 2, col = "#CCCCFF")),
+             hrzl_lines = list("3" = gpar(lwd=1), "4" = gpar(lty=2)))
+
+cardia_forest <- subgroup_cardia %>%
+  forestplot(labeltext = c(label, AUROC, Relative.Reduction.of.NNT), 
+                      is.summary = c(rep(TRUE, 3), rep(FALSE, 25)),
+                       graph.pos = 2,
+                     graphwidth = unit(70, 'mm'),
+                      # graphwidth = "auto",
+                      colgap = unit(8, 'mm'),
+                      #lineheight = "auto",
+                       boxsize = c(0.9, 0.9, 0.9, rep(0.25, 20)),
+                       clip = c(0, 1),
+                       align = c("l", "c", "c", "c", "c") , 
+                       xlog = FALSE, 
+                       title = "CARDIA", 
+                       txt_gp = fpTxtGp(title = gpar(cex=2), ticks = gpar(cex=0.7)),
+                       xticks=c(0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1),
+                       col=fpColors(box="#0f4d92",line="#0f4d92"), 
+                       ci.vertices = TRUE, 
+                      ci.vertices.height = 0.1,
+             lwd.zero = FALSE,
+             grid = structure(c(0.5), gp = gpar(lty = 2, col = "#CCCCFF")),
+             hrzl_lines = list("3" = gpar(lwd=1), "4" = gpar(lty=2)))
+
+mesa_forest <- subgroup_mesa %>%
+  forestplot(labeltext = c(label, AUROC, Relative.Reduction.of.NNT), 
+                      is.summary = c(rep(TRUE, 3), rep(FALSE, 25)),
+                       graph.pos = 2,
+                     graphwidth = unit(70, 'mm'),
+                      # graphwidth = "auto",
+                      colgap = unit(8, 'mm'),
+                      #lineheight = "auto",
+                       boxsize = c(0.9, 0.9, 0.9, rep(0.25, 16)),
+                       clip = c(0, 1),
+                       align = c("l", "c", "c", "c", "c") , 
+                       xlog = FALSE, 
+                       title = "MESA", 
+                       txt_gp = fpTxtGp(title = gpar(cex=2), ticks = gpar(cex=0.7)),
+                       xticks=c(0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1),
+                       col=fpColors(box="#0f4d92",line="#0f4d92"), 
+                       ci.vertices = TRUE, 
+                      ci.vertices.height = 0.1,
+             lwd.zero = FALSE,
+             grid = structure(c(0.5), gp = gpar(lty = 2, col = "#CCCCFF")),
+             hrzl_lines = list("3" = gpar(lwd=1), "4" = gpar(lty=2)))
+
+
+
+ukb_forest <- grid2grob(print(ukb_forest))
+aric_forest <- grid2grob(print(aric_forest))
+cardia_forest <- grid2grob(print(cardia_forest))
+mesa_forest <- grid2grob(print(mesa_forest))
+combined_forest <- wrap_elements(ukb_forest) / wrap_elements(aric_forest) / wrap_elements(cardia_forest) / wrap_elements(mesa_forest)
+
+```
+
+Survival Analysis
+```{r}
+survival <- read.csv("/Lp(a) Project/Statistical Analysis/Data/ukb_survival.csv")
+
+
+#Table
+survival$lpa_measurement <- as.factor(case_when(is.na(survival$lp_a_value) ~ "No Lp(a) Measurement",
+                                     !is.na(survival$lp_a_value) ~ "Lp(a) Measurement"))
+factor_cols <- c("sex","ethnicity", "cvd_family_history", "htn", "dm", "smoking",
+                 "heart_failure", "ascvd", "premature_ascvd_cvpx", "statin", "aspirin",
+                 "anti_htn", "insulin", "visit", 
+                 "high_pred_lp_a_measurement", "low_pred_lp_a_measurement", "high_pred", 
+                 "Death_lpa", "primary_cv_death_lpa"
+                 , "IHD_lpa", "Stroke_lpa", "MACE"
+                 )
+
+survival[factor_cols] <- lapply(survival[factor_cols], factor)
+
+table1(~age_lpa + sex + ethnicity + smoking + bmi + htn + dm +
+        heart_failure + ascvd + premature_ascvd_cvpx + cvd_family_history + aspirin + statin + 
+         anti_htn + insulin + ldl + hdl + cholesterol + triglycerides + glucose + visit +
+         high_pred + high_pred_lp_a_measurement + low_pred_lp_a_measurement + 
+         Death_lpa + IHD_lpa + Stroke_lpa + MACE +
+         primary_cv_death_lpa + follow_up_days + high_lp_a_probability |
+         lpa_measurement,
+       overall = c(left="Overall"), rowlabelhead = "Characteristic",
+       data = survival, render.missing = NULL, render.categorical="FREQ (PCTnoNA%)",
+       #extra.col=list(`P-value`=pvalue)
+       )
+
+summary(survival[!is.na(survival$lp_a_value),]$high_lp_a_probability)
+
+
+#Defining four groups (High and Low ARISE across Lp(a) Measurement/No Measurement)
+
+threshold <- 0.203
+survival$high_pred <- survival$high_lp_a_probability>=threshold
+
+survival$low_pred <- survival$high_lp_a_probability<threshold
+
+survival$high_pred_lp_a_measurement <- case_when(
+  (survival$high_pred==TRUE) & !is.na(survival$lp_a_value) ~ 1,
+  (survival$high_pred==TRUE) & is.na(survival$lp_a_value) ~ 0,
+  (survival$high_pred==FALSE) ~ NA)
+
+survival$low_pred_lp_a_measurement <- case_when(
+  (survival$low_pred==TRUE) & !is.na(survival$lp_a_value) ~ 1,
+  (survival$low_pred==TRUE) & is.na(survival$lp_a_value) ~ 0,
+  (survival$low_pred==FALSE) ~ NA)
+
+survival$four_groups <- case_when(
+  (survival$high_pred_lp_a_measurement==0) ~ 0,
+  (survival$high_pred_lp_a_measurement==1) ~ 1,
+  (survival$low_pred_lp_a_measurement==0) ~ 2,
+  (survival$low_pred_lp_a_measurement==1) ~ 3)
+
+survival$four_groups <- factor(survival$four_groups, levels=c(0:3), 
+                               labels=c("High ARISE without Lp(a) Measurement",
+                                        "High ARISE with Lp(a) Measurement",
+                                        "Low ARISE without Lp(a) Measurement",
+                                        "Low ARISE with Lp(a) Measurement"))
+  
+#Defining non-CV death
+survival$non_primary_cv_death_lpa <- case_when(
+  (survival$Death_lpa==1) & (survival$primary_cv_death_lpa==0) ~ 1,
+  (survival$Death_lpa==1) & (survival$primary_cv_death_lpa==1) ~ 0,
+  (survival$Death_lpa==0) ~ 0,
+  is.na(survival$Death_lpa) ~ NA)
+summary(survival$non_primary_cv_death_lpa)
+
+#High vs low pred-All cause mortality
+high_pred <- coxph(Surv(Time2Death_lpa, Death_lpa) ~ age_lpa + sex + high_pred, id=eid,
+                   data = survival)
+summary(high_pred)
+
+#High vs low pred-MACE
+high_pred_mace <- coxph(Surv(Time2MACE, MACE) ~ age_lpa + sex + high_pred, id=eid,
+                   data = survival)
+summary(high_pred_mace)
+
+#High vs low pred-CV mortality
+high_pred_primary_cv <- coxph(Surv(Time2Death_lpa, primary_cv_death_lpa) ~ age_lpa + sex + high_pred, id=eid,
+                   data = survival)
+summary(high_pred_primary_cv)
+
+#High pred +- meas, MACE, and All-cause and CV mortality
+high_pred_lpa_meas <- coxph(Surv(Time2Death_lpa, Death_lpa) ~ age_lpa + sex + high_pred_lp_a_measurement, id=eid,
+                   data = survival)
+summary(high_pred_lpa_meas)
+
+high_pred_lpa_meas_mace <- coxph(Surv(Time2MACE, MACE) ~ age_lpa + sex + high_pred_lp_a_measurement, id=eid,
+                   data = survival)
+summary(high_pred_lpa_meas_mace)
+
+high_pred_lpa_meas_cv_death <- coxph(Surv(Time2Death_lpa, primary_cv_death_lpa) ~ age_lpa + 
+                                       sex + high_pred_lp_a_measurement, id=eid, data = survival)
+summary(high_pred_lpa_meas_cv_death)
+
+
+#Low pred +- meas, MACE, and All-cause and CV mortality
+low_pred_lpa_meas <- coxph(Surv(Time2Death_lpa, Death_lpa) ~ age_lpa + sex + low_pred_lp_a_measurement, id=eid,
+                  data = survival)
+summary(low_pred_lpa_meas)
+
+low_pred_lpa_meas_mace <- coxph(Surv(Time2MACE, MACE) ~ age_lpa + sex + low_pred_lp_a_measurement, id=eid,
+                  data = survival)
+summary(low_pred_lpa_meas_mace)
+
+low_pred_lpa_meas_cv_death <- coxph(Surv(Time2Death_lpa, primary_cv_death_lpa) ~ age_lpa + 
+                                       sex + low_pred_lp_a_measurement,id=eid, data = survival)
+summary(low_pred_lpa_meas_cv_death)
+
+
+#Plot for High and Low ARISE
+survival$high_pred <- factor(survival$high_pred, levels=c(TRUE, FALSE), 
+                               labels=c("High ARISE", "Low ARISE"))
+#Death
+two_groups_cox <- coxph(Surv(Time2Death_lpa, Death_lpa) ~ age_lpa + sex + strata(high_pred),
+                        data = survival)
+ggsurvplot(survfit(two_groups_cox), data = survival, ylim=c(0.96,1),
+           risk.table = TRUE, #conf.int = TRUE,
+           ylab="Survival After Lp(a) Assay Date", xlab="Follow-up Time (days)",
+           size=1, risk.table.y.text = FALSE, palette = 
+    c("#FF0000", "#004D40"), ggtheme = theme(
+             axis.text.x = element_text(size=22, vjust = 0.5, colour = "#000000"),
+          axis.text.y = element_text(size=22, vjust = 0.5, colour = "#000000"),
+          axis.title.y = element_text(size=24, face="bold", colour = "#000000"),
+          axis.title.x = element_text(size=24, face="bold", colour = "#000000"),
+             axis.line.x = element_line(colour = "#000000"),
+          axis.line.y = element_line(colour = "#000000"),
+             panel.background = element_rect(fill='transparent'),
+          plot.background = element_rect(fill='transparent', color=NA),
+          legend.title=element_text(size=16),
+          legend.position="bottom",
+          legend.text=element_text(size=22))
+            #title = "Survival Curves by high_pred"
+)
+
+#MACE
+two_groups_cox_mace <- coxph(Surv(Time2MACE, MACE) ~ age_lpa + sex + strata(high_pred),
+                        data = survival)
+ggsurvplot(survfit(two_groups_cox_mace), data = survival, ylim=c(0.96,1),
+           risk.table = TRUE, #conf.int = TRUE,
+           ylab="Survival After Lp(a) Assay Date", xlab="Follow-up Time (days)",
+           size=1, risk.table.y.text = FALSE, palette = 
+    c("#FF0000", "#004D40"), ggtheme = theme(
+             axis.text.x = element_text(size=22, vjust = 0.5, colour = "#000000"),
+          axis.text.y = element_text(size=22, vjust = 0.5, colour = "#000000"),
+          axis.title.y = element_text(size=24, face="bold", colour = "#000000"),
+          axis.title.x = element_text(size=24, face="bold", colour = "#000000"),
+             axis.line.x = element_line(colour = "#000000"),
+          axis.line.y = element_line(colour = "#000000"),
+             panel.background = element_rect(fill='transparent'),
+          plot.background = element_rect(fill='transparent', color=NA),
+          legend.title=element_text(size=16),
+          legend.position="bottom",
+          legend.text=element_text(size=22))
+            #title = "Survival Curves by high_pred"
+)
+
+
+#Plot for High and Low ARISE across Lp(a) Measurement/No Measurement
+#Death
+four_groups_cox <- coxph(Surv(Time2Death_lpa, Death_lpa) ~ age_lpa + sex + strata(four_groups),
+                         id=eid,
+                        data = survival)
+ggsurvplot(survfit(four_groups_cox), data = survival, ylim=c(0.96,1),
+           risk.table = TRUE, #conf.int = TRUE,
+           ylab="Survival After Lp(a) Assay Date", xlab="Follow-up Time (days)",
+           size=1, risk.table.y.text = FALSE, palette = 
+    c("#7D0108", "#FFBF00", "#1FD068", "#1E88E5"), ggtheme = theme(
+             axis.text.x = element_text(size=22, vjust = 0.5, colour = "#000000"),
+          axis.text.y = element_text(size=22, vjust = 0.5, colour = "#000000"),
+          axis.title.y = element_text(size=24, face="bold", colour = "#000000"),
+          axis.title.x = element_text(size=24, face="bold", colour = "#000000"),
+             axis.line.x = element_line(colour = "#000000"),
+          axis.line.y = element_line(colour = "#000000"),
+             panel.background = element_rect(fill='transparent'),
+          plot.background = element_rect(fill='transparent', color=NA),
+          legend.title=element_text(size=22),
+          legend.position="bottom",
+          legend.text=element_text(size=22))
+            #title = "Survival Curves by high_pred"
+           ) 
+
+#MACE
+four_groups_cox_mace <- coxph(Surv(Time2MACE, MACE) ~ age_lpa + sex + strata(four_groups),
+                              id=eid,
+                        data = survival)
+ggsurvplot(survfit(four_groups_cox_mace), data = survival, ylim=c(0.96,1),
+           risk.table = TRUE, #conf.int = TRUE,
+           ylab="Survival After Lp(a) Assay Date", xlab="Follow-up Time (days)",
+           size=1, risk.table.y.text = FALSE, palette = 
+    c("#7D0108", "#FFBF00", "#1FD068", "#1E88E5"), ggtheme = theme(
+             axis.text.x = element_text(size=22, vjust = 0.5, colour = "#000000"),
+          axis.text.y = element_text(size=22, vjust = 0.5, colour = "#000000"),
+          axis.title.y = element_text(size=24, face="bold", colour = "#000000"),
+          axis.title.x = element_text(size=24, face="bold", colour = "#000000"),
+             axis.line.x = element_line(colour = "#000000"),
+          axis.line.y = element_line(colour = "#000000"),
+             panel.background = element_rect(fill='transparent'),
+          plot.background = element_rect(fill='transparent', color=NA),
+          legend.title=element_text(size=22),
+          legend.position="bottom",
+          legend.text=element_text(size=22))
+            #title = "Survival Curves by high_pred"
+           )
+```
+
+
+
